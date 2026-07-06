@@ -456,9 +456,15 @@ internal sealed class PopoverView : Control
 
     private static string ResetText(UsageWindow window)
     {
-        return window.ResetsAt is null
-            ? string.Empty
-            : string.Format(CultureInfo.CurrentCulture, UiText.ResetAfterFormat, RelativeTime(window.ResetsAt.Value));
+        if (window.ResetsAt is null)
+        {
+            return string.Empty;
+        }
+
+        var resetsAt = window.ResetsAt.Value;
+        return resetsAt <= DateTimeOffset.Now
+            ? string.Format(CultureInfo.CurrentCulture, UiText.ResetDoneFormat, resetsAt.LocalDateTime)
+            : string.Format(CultureInfo.CurrentCulture, UiText.ResetAfterFormat, RelativeTime(resetsAt));
     }
 
     private static string ShortStatus(ProviderStatus status)
@@ -683,6 +689,7 @@ internal static class UiText
     public const string Checking = "確認中";
     public const string Reset = "リセット";
     public const string ResetAfterFormat = "{0} 後にリセット";
+    public const string ResetDoneFormat = "リセット済み（{0:M/d H:mm} 時点の記録）";
     public const string ResetCompleted = "がリセットされました";
     public const string PercentRemainingFormat = "{0:0}% 残り";
     public const string PercentUsedFormat = "{0:0}% 使用";
