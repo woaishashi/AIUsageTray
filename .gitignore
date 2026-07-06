@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Local CodexBar configs can contain API keys and cookies.
+.codexbar/
+.config/codexbar/
+config.json
