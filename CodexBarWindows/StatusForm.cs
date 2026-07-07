@@ -1,14 +1,18 @@
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using CodexBarWindows.Providers;
 
 namespace CodexBarWindows;
 
 internal sealed class StatusForm : Form
 {
+    private const int WmExitSizeMove = 0x0232;
+
     private readonly PopoverView _view;
     private bool _allowClose;
+    private bool _userMoved;
 
     public StatusForm(Action refresh, Action openConfigFolder, Action exit)
     {
@@ -63,6 +67,15 @@ internal sealed class StatusForm : Form
         }
     }
 
+    protected override void WndProc(ref Message m)
+    {
+        base.WndProc(ref m);
+        if (m.Msg == WmExitSizeMove)
+        {
+            _userMoved = true;
+        }
+    }
+
     protected override void OnResize(EventArgs e)
     {
         base.OnResize(e);
@@ -83,10 +96,13 @@ internal sealed class StatusForm : Form
             return;
         }
 
-        var area = Screen.FromPoint(Cursor.Position).WorkingArea;
-        Location = new Point(
-            Math.Max(area.Left + 12, area.Right - Width - 18),
-            Math.Max(area.Top + 12, area.Bottom - Height - 18));
+        if (!_userMoved)
+        {
+            var area = Screen.FromPoint(Cursor.Position).WorkingArea;
+            Location = new Point(
+                Math.Max(area.Left + 12, area.Right - Width - 18),
+                Math.Max(area.Top + 12, area.Bottom - Height - 18));
+        }
 
         if (WindowState == FormWindowState.Minimized)
         {
@@ -190,7 +206,22 @@ internal sealed class PopoverView : Control
     {
         base.OnMouseDown(e);
         var target = _hitTargets.FirstOrDefault(hitTarget => hitTarget.Bounds.Contains(e.Location));
-        target?.Action();
+        if (target is not null)
+        {
+            target.Action();
+            return;
+        }
+
+        // ボタン以外を左ドラッグしたら、タイトルバー掴み扱いにしてウィンドウごと移動できるようにする。
+        if (e.Button == MouseButtons.Left)
+        {
+            var form = FindForm();
+            if (form is not null)
+            {
+                NativeMethods.ReleaseCapture();
+                NativeMethods.SendMessage(form.Handle, NativeMethods.WmNcLButtonDown, NativeMethods.HtCaption, IntPtr.Zero);
+            }
+        }
     }
 
     private void DrawWindowControls(Graphics g)
@@ -716,4 +747,16 @@ internal static class UiText
     public const string About = "AIUsageTray について";
     public const string Quit = "終了";
     public const string Now = "今";
+}
+
+internal static class NativeMethods
+{
+    public const int WmNcLButtonDown = 0x00A1;
+    public static readonly IntPtr HtCaption = new(2);
+
+    [DllImport("user32.dll")]
+    public static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 }
