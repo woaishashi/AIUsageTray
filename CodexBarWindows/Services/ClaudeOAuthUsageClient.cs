@@ -4,7 +4,7 @@ using System.Text.Json;
 
 namespace CodexBarWindows.Services;
 
-internal sealed record ClaudeUsageWindow(string Key, double Utilization, DateTimeOffset? ResetsAt);
+internal sealed record ClaudeUsageWindow(string Key, double Utilization, DateTimeOffset? ResetsAt, string? Label = null);
 
 internal sealed record ClaudeUsageResult(
     IReadOnlyList<ClaudeUsageWindow> Windows,
@@ -169,12 +169,31 @@ internal sealed class ClaudeOAuthUsageClient
         var root = document.RootElement;
         var windows = new List<ClaudeUsageWindow>();
 
-        foreach (var key in new[] { "five_hour", "seven_day", "seven_day_sonnet", "seven_day_opus" })
+        foreach (var key in new[] { "five_hour", "seven_day" })
         {
             var window = ParseWindow(root, key);
             if (window is not null)
             {
                 windows.Add(window);
+            }
+        }
+
+        // モデル別の週間枠は、新形式の `limits` 配列（scope.model.display_name 付き）を優先し、
+        // 無い場合のみ従来の平坦な seven_day_sonnet / seven_day_opus キーにフォールバックする。
+        var scopedModelWindows = ParseScopedWeeklyLimits(root);
+        if (scopedModelWindows.Count > 0)
+        {
+            windows.AddRange(scopedModelWindows);
+        }
+        else
+        {
+            foreach (var key in new[] { "seven_day_sonnet", "seven_day_opus" })
+            {
+                var window = ParseWindow(root, key);
+                if (window is not null)
+                {
+                    windows.Add(window);
+                }
             }
         }
 
@@ -210,7 +229,7 @@ internal sealed class ClaudeOAuthUsageClient
             return null;
         }
 
-        double utilization = 0;
+        double? utilization = null;
         if (window.TryGetProperty("utilization", out var util) && util.ValueKind == JsonValueKind.Number)
         {
             utilization = util.GetDouble();
@@ -220,21 +239,117 @@ internal sealed class ClaudeOAuthUsageClient
             utilization = used.GetDouble();
         }
 
-        DateTimeOffset? resetsAt = null;
-        if (window.TryGetProperty("resets_at", out var resets))
+        // utilization が無い枠（null ペイロード等）は表示しない。0% と区別する。
+        if (utilization is null || double.IsNaN(utilization.Value) || double.IsInfinity(utilization.Value))
         {
-            if (resets.ValueKind == JsonValueKind.String
-                && DateTimeOffset.TryParse(resets.GetString(), out var parsed))
-            {
-                resetsAt = parsed.ToLocalTime();
-            }
-            else if (resets.ValueKind == JsonValueKind.Number && resets.TryGetInt64(out var unixSeconds))
-            {
-                resetsAt = DateTimeOffset.FromUnixTimeSeconds(unixSeconds).ToLocalTime();
-            }
+            return null;
         }
 
-        return new ClaudeUsageWindow(key, Math.Clamp(utilization, 0, 100), resetsAt);
+        return new ClaudeUsageWindow(key, Math.Clamp(utilization.Value, 0, 100), ParseResetsAt(window));
+    }
+
+    /// <summary>
+    /// 新形式の `limits` 配列から、モデルに紐づく週間枠 (kind=weekly_scoped, group=weekly) を取り出す。
+    /// 各エントリの scope.model.display_name をラベルとして使う。
+    /// </summary>
+    private static List<ClaudeUsageWindow> ParseScopedWeeklyLimits(JsonElement root)
+    {
+        var result = new List<ClaudeUsageWindow>();
+        if (!root.TryGetProperty("limits", out var limits) || limits.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in limits.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (!TryGetString(entry, "group", out var group) || !string.Equals(group, "weekly", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!TryGetString(entry, "kind", out var kind) || !string.Equals(kind, "weekly_scoped", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!entry.TryGetProperty("percent", out var percentElement) || percentElement.ValueKind != JsonValueKind.Number)
+            {
+                continue;
+            }
+
+            var percent = percentElement.GetDouble();
+            if (double.IsNaN(percent) || double.IsInfinity(percent))
+            {
+                continue;
+            }
+
+            string? modelName = null;
+            string? modelId = null;
+            if (entry.TryGetProperty("scope", out var scope) && scope.ValueKind == JsonValueKind.Object
+                && scope.TryGetProperty("model", out var model) && model.ValueKind == JsonValueKind.Object)
+            {
+                TryGetString(model, "display_name", out modelName);
+                TryGetString(model, "id", out modelId);
+            }
+
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                continue;
+            }
+
+            var identity = string.IsNullOrWhiteSpace(modelId) ? modelName! : modelId!;
+            if (!seen.Add(identity))
+            {
+                continue;
+            }
+
+            result.Add(new ClaudeUsageWindow(
+                $"weekly_scoped:{identity}",
+                Math.Clamp(percent, 0, 100),
+                ParseResetsAt(entry),
+                modelName));
+        }
+
+        return result;
+    }
+
+    private static bool TryGetString(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (element.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.String)
+        {
+            value = property.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        return false;
+    }
+
+    private static DateTimeOffset? ParseResetsAt(JsonElement obj)
+    {
+        if (!obj.TryGetProperty("resets_at", out var resets))
+        {
+            return null;
+        }
+
+        if (resets.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(resets.GetString(), out var parsed))
+        {
+            return parsed.ToLocalTime();
+        }
+
+        if (resets.ValueKind == JsonValueKind.Number && resets.TryGetInt64(out var unixSeconds))
+        {
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds).ToLocalTime();
+        }
+
+        return null;
     }
 
     private static string? SummarizeExtraUsage(JsonElement extra)

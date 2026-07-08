@@ -58,6 +58,8 @@ internal sealed class ClaudeUsageProvider : IUsageProvider
                 "seven_day" => (UiText.Weekly, WindowKind.Weekly),
                 "seven_day_sonnet" => (UiText.WeeklySonnet, WindowKind.ModelWeekly),
                 "seven_day_opus" => (UiText.WeeklyOpus, WindowKind.ModelWeekly),
+                _ when window.Key.StartsWith("weekly_scoped:", StringComparison.Ordinal)
+                    => (string.Format(CultureInfo.CurrentCulture, UiText.WeeklyModelFormat, window.Label), WindowKind.ModelWeekly),
                 _ => (window.Key, WindowKind.Info)
             };
 

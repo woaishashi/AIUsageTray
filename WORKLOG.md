@@ -272,3 +272,48 @@
 ### 検証
 
 - ビルド警告 0 / エラー 0。PrintWindow ダンプで更新ボタン・カプセル表示を確認。
+
+## 2026-07-08 追記: 「モデル」行が表示されない問題を修正
+
+### 症状
+
+- Claude の使用量表示で「モデル」行が常に `使用量は未取得` のままだった。
+
+### 原因
+
+- Anthropic の OAuth usage API (`/api/oauth/usage`) が、モデル別の週間枠を新形式の
+  `limits` 配列（各エントリが `kind:"weekly_scoped"` / `group:"weekly"` / `percent` と
+  `scope.model.display_name` を持つ）で返すようになり、従来の平坦な
+  `seven_day_sonnet` / `seven_day_opus` キーを置き換えつつある。
+- Windows 版は旧キーしか読んでいなかったため、`limits` でモデル枠が来るアカウントでは
+  モデル別データを取得できず「モデル」行が空だった（上流 CodexBar の
+  `ClaudeScopedWeeklyLimitMapper` に対応する処理が欠落）。
+
+### 今回やったこと
+
+- `ClaudeOAuthUsageClient` に `limits` 配列の解析を追加。`kind=weekly_scoped` かつ
+  `group=weekly` のエントリから `scope.model.display_name` と `percent` を取り出し、
+  `weekly_scoped:<modelId>` というキーの週間枠として生成する（`Label` にモデル名を保持）。
+  `limits` が無い場合のみ従来の `seven_day_sonnet` / `seven_day_opus` にフォールバック。
+- `ClaudeUsageWindow` に `Label`（モデル表示名）を追加。
+- `ParseWindow` を堅牢化: `utilization` / `used_percent` がどちらも数値で存在しない枠
+  （`resets_at` だけの null ペイロード等）は破棄し、明示的な 0% とは区別するようにした。
+- `resets_at` 解析を `ParseResetsAt` に共通化。
+- `ClaudeUsageProvider` で `weekly_scoped:` キーを `週間 (<モデル名>)` の
+  `ModelWeekly` 枠にマッピング。`UiText.WeeklyModelFormat` を追加。
+- `utilization` / `percent` は 0–100 のまま（値域変換は不要なことを上流実装で確認）。
+
+### 検証
+
+- `dotnet build` 警告 0 / エラー 0。
+- ビルド済みアセンブリの `ParseUsage` をリフレクションで直接呼び、以下を確認:
+  - 新 `limits` 形式 → `weekly_scoped:claude-opus-4`(Opus 33.5%) /
+    `weekly_scoped:claude-sonnet-4`(Sonnet 12%) のモデル枠が生成される。
+  - 旧形式 → `seven_day_opus` へ正しくフォールバック。
+  - `resets_at` だけの枠は破棄、明示的 0% は保持。
+- 修正版 exe を起動し、PID 6752 で常駐することを確認。
+
+### 既知の制限
+
+- UI のメーターは `セッション` / `週間` / `モデル` の 3 行固定のため、複数モデルの
+  週間枠がある場合は先頭の 1 つだけを「モデル」行に表示する（mac 版は全モデルを列挙）。

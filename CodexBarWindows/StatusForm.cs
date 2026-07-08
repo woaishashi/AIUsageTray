@@ -730,6 +730,7 @@ internal static class UiText
     public const string Model = "モデル";
     public const string WeeklySonnet = "週間 (Sonnet)";
     public const string WeeklyOpus = "週間 (Opus)";
+    public const string WeeklyModelFormat = "週間 ({0})";
     public const string ExtraUsage = "追加使用量";
     public const string Cost = "コスト";
     public const string UsageNotFetched = "使用量は未取得";
