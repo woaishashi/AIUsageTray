@@ -26,15 +26,14 @@ internal sealed class StatusForm : Form
         Opacity = 1.0;
         AutoScaleDimensions = new SizeF(96, 96);
         AutoScaleMode = AutoScaleMode.Dpi;
-        Size = new Size(820, 760);
-        MinimumSize = new Size(820, 580);
-        MaximumSize = Size;
+        Size = new Size(520, 300);
 
         _view = new PopoverView(refresh, openConfigFolder, exit)
         {
             Dock = DockStyle.Fill
         };
         Controls.Add(_view);
+        _view.LayoutChanged += ApplyViewSize;
 
         KeyDown += (_, args) =>
         {
@@ -89,8 +88,19 @@ internal sealed class StatusForm : Form
     public void SetSnapshots(IReadOnlyList<ProviderSnapshot> snapshots, string message)
     {
         _view.SetSnapshots(snapshots, message);
+        ApplyViewSize();
+    }
+
+    private void ApplyViewSize()
+    {
         var scale = DeviceDpi / 96f;
-        Size = new Size((int)(820 * scale), (int)(_view.PreferredLogicalHeight * scale));
+        Size = new Size((int)(_view.PreferredLogicalWidth * scale), (int)(_view.PreferredLogicalHeight * scale));
+        if (Visible)
+        {
+            var area = Screen.FromControl(this).WorkingArea;
+            Location = new Point(Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)),
+                Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height)));
+        }
     }
 
     public void ShowStatus()
