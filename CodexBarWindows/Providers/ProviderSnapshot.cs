@@ -36,7 +36,8 @@ internal sealed record ProviderSnapshot(
     IReadOnlyList<UsageWindow> Windows,
     DateTimeOffset RefreshedAt,
     string? Plan = null,
-    string? CostLine = null)
+    string? CostLine = null,
+    string? Model = null)
 {
     public static ProviderSnapshot Pending(string providerId, string displayName)
     {

@@ -17,7 +17,7 @@ internal sealed record CodexRateLimits(
 /// </summary>
 internal sealed class CodexRateLimitReader
 {
-    private const int MaxFilesToProbe = 8;
+    private const int MaxFilesToProbe = 32;
     private const int TailBytesToRead = 512 * 1024;
 
     public CodexRateLimits? ReadLatest(string codexHome, CancellationToken cancellationToken)
@@ -43,17 +43,18 @@ internal sealed class CodexRateLimitReader
             return null;
         }
 
+        CodexRateLimits? latest = null;
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var parsed = ReadLastRateLimits(file);
-            if (parsed is not null)
+            if (parsed is not null && (latest is null || parsed.ObservedAt > latest.ObservedAt))
             {
-                return parsed;
+                latest = parsed;
             }
         }
 
-        return null;
+        return latest;
     }
 
     private static CodexRateLimits? ReadLastRateLimits(string file)
@@ -99,12 +100,18 @@ internal sealed class CodexRateLimitReader
             using var document = JsonDocument.Parse(line);
             var root = document.RootElement;
             if (!root.TryGetProperty("payload", out var payload)
-                || !payload.TryGetProperty("rate_limits", out var rateLimits))
+                || payload.ValueKind != JsonValueKind.Object
+                || !payload.TryGetProperty("rate_limits", out var rateLimits)
+                || rateLimits.ValueKind != JsonValueKind.Object)
             {
                 return null;
             }
 
-            var observedAt = DateTimeOffset.Now;
+            if (rateLimits.TryGetProperty("limit_id", out var limitId)
+                && limitId.ValueKind == JsonValueKind.String && limitId.GetString() is string id && id != "codex")
+                return null;
+
+            var observedAt = DateTimeOffset.MinValue;
             if (root.TryGetProperty("timestamp", out var timestamp)
                 && timestamp.ValueKind == JsonValueKind.String
                 && DateTimeOffset.TryParse(timestamp.GetString(), out var parsedTimestamp))
@@ -118,13 +125,16 @@ internal sealed class CodexRateLimitReader
                 planType = plan.GetString();
             }
 
+            var primary = ParseWindow(rateLimits, "primary");
+            var secondary = ParseWindow(rateLimits, "secondary");
+            if (primary is null && secondary is null) return null;
             return new CodexRateLimits(
-                ParseWindow(rateLimits, "primary"),
-                ParseWindow(rateLimits, "secondary"),
+                primary,
+                secondary,
                 planType,
                 observedAt);
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentOutOfRangeException or FormatException or OverflowException)
         {
             return null;
         }
@@ -137,11 +147,8 @@ internal sealed class CodexRateLimitReader
             return null;
         }
 
-        double usedPercent = 0;
-        if (window.TryGetProperty("used_percent", out var used) && used.ValueKind == JsonValueKind.Number)
-        {
-            usedPercent = used.GetDouble();
-        }
+        if (!window.TryGetProperty("used_percent", out var used) || !used.TryGetDouble(out var usedPercent)
+            || !double.IsFinite(usedPercent)) return null;
 
         var windowMinutes = 0;
         if (window.TryGetProperty("window_minutes", out var minutes) && minutes.ValueKind == JsonValueKind.Number)

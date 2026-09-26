@@ -24,26 +24,8 @@ internal sealed class CodexUsageProvider : IUsageProvider
         var rateLimits = _rateLimitReader.ReadLatest(codexHome, cancellationToken);
         var usage30d = _localUsageScanner.Scan(GetCodexUsageRoots(codexHome), 30, cancellationToken);
 
-        var windows = new List<UsageWindow>();
-        if (rateLimits?.Primary is not null)
-        {
-            windows.Add(new UsageWindow(
-                UiText.Session,
-                UsedText(rateLimits.Primary.UsedPercent),
-                rateLimits.Primary.ResetsAt,
-                rateLimits.Primary.UsedPercent,
-                WindowKind.Session));
-        }
-
-        if (rateLimits?.Secondary is not null)
-        {
-            windows.Add(new UsageWindow(
-                UiText.Weekly,
-                UsedText(rateLimits.Secondary.UsedPercent),
-                rateLimits.Secondary.ResetsAt,
-                rateLimits.Secondary.UsedPercent,
-                WindowKind.Weekly));
-        }
+        var windows = BuildWindows(rateLimits);
+        var model = CodexModelReader.ReadLatest(codexHome, cancellationToken);
 
         var costLine = usage30d.HasUsage
             ? string.Format(CultureInfo.CurrentCulture, UiText.Last30dTokensFormat, FormatShortTokens(usage30d.TotalTokens))
@@ -53,10 +35,10 @@ internal sealed class CodexUsageProvider : IUsageProvider
         string summary;
         if (rateLimits is not null)
         {
-            status = ProviderStatus.Available;
-            summary = rateLimits.Primary is null
-                ? UiText.Ready
-                : $"{UiText.Session} {UsedText(rateLimits.Primary.UsedPercent)}";
+            var stale = DateTimeOffset.Now - rateLimits.ObservedAt > TimeSpan.FromMinutes(15)
+                || windows.Any(w => w.ResetsAt <= DateTimeOffset.Now);
+            status = stale ? ProviderStatus.Warning : ProviderStatus.Available;
+            summary = stale ? "過去のログ記録 · Codex利用後に更新" : "ローカルログの使用量";
         }
         else if (authJsonExists)
         {
@@ -82,7 +64,24 @@ internal sealed class CodexUsageProvider : IUsageProvider
             windows,
             rateLimits?.ObservedAt ?? DateTimeOffset.Now,
             PrettyPlan(rateLimits?.PlanType),
-            costLine);
+            costLine,
+            model);
+    }
+
+    internal static List<UsageWindow> BuildWindows(CodexRateLimits? limits)
+    {
+        var result = new List<UsageWindow>();
+        foreach (var window in new[] { limits?.Primary, limits?.Secondary }.OfType<CodexRateLimitWindow>())
+        {
+            var (name, kind) = window.WindowMinutes switch
+            {
+                300 => ("セッション · 5時間", WindowKind.Session),
+                10080 => (UiText.Weekly, WindowKind.Weekly),
+                _ => ($"利用枠 · {window.WindowMinutes}分", WindowKind.Info)
+            };
+            result.Add(new UsageWindow(name, UsedText(window.UsedPercent), window.ResetsAt, window.UsedPercent, kind));
+        }
+        return result;
     }
 
     private static string UsedText(double usedPercent)

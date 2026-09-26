@@ -11,4 +11,8 @@
     <Product>AIUsageTray</Product>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="AIUsageTray.Tests" />
+  </ItemGroup>
+
 </Project>
