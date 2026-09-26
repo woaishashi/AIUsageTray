@@ -1,5 +1,15 @@
 # WORKLOG
 
+## 2026-09-26: Glass overview and Codex metadata
+
+- Replaced provider tabs with side-by-side Codex/Claude glass-style cards, all model quota rows, overflow scrolling, and retained extra provider cards and settings/refresh actions.
+- Fixed the assumption that Codex primary always means five hours: the current account returns a 10,080-minute primary window and no secondary. Both local events and the Codex account usage tool confirmed that it is weekly-only.
+- Read the latest local turn model separately from quota data; verified `gpt-6-astra` on the live account. No model quota percentages are invented.
+- Skip null/empty/malformed quota records, retain explicit zero, compare event timestamps across files, and flag old/reset snapshots.
+- Verified 14 checks including real Codex weekly/model reads; rendered synthetic multi-model and live previews. Claude currently requires reauthentication; no credential files were modified.
+- Official protocol reference reviewed: https://learn.chatgpt.com/docs/app-server. This change retains local-log Codex reads rather than introducing app-server authentication.
+- Glass styling is painted gradients and translucent cards, not native desktop background blur.
+
 ## 2026-07-06
 
 ### 今回やったこと

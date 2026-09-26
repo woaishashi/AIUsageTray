@@ -3,6 +3,7 @@ obj/
 *.user
 *.suo
 .vs/
+.tmp/
 
 # Local CodexBar configs can contain API keys and cookies.
 .codexbar/
