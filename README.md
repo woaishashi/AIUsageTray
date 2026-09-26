@@ -38,6 +38,7 @@ The app reads provider settings from config but does not print, log, or write se
 ## Overview and Codex data
 
 - The glass-style overview shows Codex and Claude side by side, including all returned model-specific quota windows. Scroll to see additional providers or overflow rows.
+- The default 520 × 300 logical-pixel compact view keeps both providers, five-hour/weekly quotas, reset countdowns, and the latest Codex model visible. Use `詳細` for the full overview and `縮小表示` to return. Long labels have hover tooltips.
 - Codex quota windows are classified by their duration: 300 minutes is a session window, 10,080 minutes is a weekly window. A primary window can be weekly; an absent session quota is explicitly shown as not provided.
 - Codex reads the latest valid quota event by event timestamp from the 32 most recently modified local session logs. Missing percentages are not treated as zero. Null and partially written events are skipped.
 - The most recently recorded `turn_context.model` is displayed separately from model-specific quota windows. It represents the latest local turn, not every open task.

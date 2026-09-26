@@ -1,5 +1,11 @@
 # WORKLOG
 
+## 2026-09-26: Compact always-visible layout
+
+- Default window reduced from 820 × 580 to 520 × 300 logical pixels (about 67% less area), keeping Codex and Claude side by side.
+- Compact cards retain five-hour/weekly usage, reset countdowns, connection status, latest Codex model, and observation times. Full model quotas and additional providers remain accessible via 詳細; 縮小表示 returns to compact mode.
+- Layout toggling resets scrolling and keeps the window within its current monitor. Verified build, existing regression checks, and rendered compact layout.
+
 ## 2026-09-26: Glass overview and Codex metadata
 
 - Replaced provider tabs with side-by-side Codex/Claude glass-style cards, all model quota rows, overflow scrolling, and retained extra provider cards and settings/refresh actions.

@@ -66,12 +66,25 @@ internal static class Program
             Check(codex.Windows.Any(w => w.Kind == WindowKind.Weekly), "live Codex weekly quota");
         }
         Directory.CreateDirectory(".tmp");
-        using var form = new PopoverView(() => { }, () => { }, () => { }) { Size = new Size(820, 760) };
+        using var form = new PopoverView(() => { }, () => { }, () => { }) { Size = new Size(520, 300) };
         form.SetSnapshots([codex, claude], "5分ごとに自動更新 · マウスホイールでスクロール");
         using var bitmap = new Bitmap(form.Width, form.Height);
         form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, form.Size));
         bitmap.Save(args.Contains("--live") ? ".tmp/overview-live.png" : ".tmp/overview-test.png");
-        Check(bitmap.Width == 820, "overview render");
+        Check(bitmap.Width == 520, "compact overview render");
+        using var window = new StatusForm(() => { }, () => { }, () => { });
+        window.SetSnapshots([codex, claude], "");
+        var view = window.Controls[0];
+        var mouseDown = typeof(Control).GetMethod("OnMouseDown", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        using var initial = new Bitmap(window.Width, window.Height);
+        view.DrawToBitmap(initial, new Rectangle(Point.Empty, view.Size));
+        mouseDown.Invoke(view, [new MouseEventArgs(MouseButtons.Left, 1, 350, 20, 0)]);
+        Check(window.Width == 820, "details expands window");
+        using var expanded = new Bitmap(window.Width, window.Height);
+        view.DrawToBitmap(expanded, new Rectangle(Point.Empty, view.Size));
+        expanded.Save(".tmp/overview-expanded.png");
+        mouseDown.Invoke(view, [new MouseEventArgs(MouseButtons.Left, 1, 240, 35, 0)]);
+        Check(window.Size == new Size(520, 300), "compact button restores window");
         Console.WriteLine($"{_checks} checks passed.");
     }
 }

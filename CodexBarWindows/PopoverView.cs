@@ -13,6 +13,9 @@ internal sealed class PopoverView : Control
     private int _scroll, _contentHeight;
     private readonly ToolTip _tooltip = new();
     private readonly List<(Rectangle Bounds, string Text)> _tips = new();
+    public bool Compact { get; private set; } = true;
+    public event Action? LayoutChanged;
+    public int PreferredLogicalWidth => Compact ? 520 : 820;
 
     public PopoverView(Action refresh, Action settings, Action exit)
     {
@@ -26,7 +29,7 @@ internal sealed class PopoverView : Control
         _snapshots = snapshots; _message = message; Invalidate();
     }
 
-    public int PreferredLogicalHeight => Math.Clamp(157 + _snapshots
+    public int PreferredLogicalHeight => Compact ? 300 : Math.Clamp(157 + _snapshots
         .Where(s => s.ProviderId is "codex" or "claude")
         .Select(CardHeight).DefaultIfEmpty(420).Max(), 580, 760);
 
@@ -54,8 +57,14 @@ internal sealed class PopoverView : Control
         using (var edge = new Pen(Color.FromArgb(95, 214, 234, 247)))
             g.DrawRoundedRectangle(edge, new Rectangle(1, 1, w - 3, h - 3), 18);
 
+        if (Compact)
+        {
+            DrawCompact(g, w, h);
+            return;
+        }
+
         TextAt(g, "AIUsageTray", 22, 16, 240, 30, 15, true);
-        TextAt(g, "USAGE OVERVIEW", 23, 50, 240, 22, 8, false, CodexColors.MutedText);
+        Button(g, new Rectangle(210, 23, 78, 30), "縮小表示", ToggleLayout);
         Button(g, new Rectangle(w - 226, 24, 104, 34), "↻  更新", _refresh, Color.FromArgb(52, 120, 155));
         Button(g, new Rectangle(w - 110, 24, 36, 34), "−", () => { if (FindForm() is { } f) f.WindowState = FormWindowState.Minimized; });
         Button(g, new Rectangle(w - 64, 24, 36, 34), "×", () => FindForm()?.Hide());
@@ -82,7 +91,7 @@ internal sealed class PopoverView : Control
         _contentHeight = bottom - top;
         g.Restore(state);
         // Do not allow clipped card links to intercept footer or header clicks.
-        for (var i = _targets.Count - 1; i >= 3; i--)
+        for (var i = _targets.Count - 1; i >= 4; i--)
         {
             var target = _targets[i];
             _targets[i] = (Rectangle.Intersect(target.Bounds, content), target.Action);
@@ -97,6 +106,67 @@ internal sealed class PopoverView : Control
         TextAt(g, _message, 23, h - 48, w - 210, 27, 8, false, CodexColors.MutedText);
         Button(g, new Rectangle(w - 177, h - 52, 70, 32), "設定", _settings);
         Button(g, new Rectangle(w - 97, h - 52, 70, 32), "終了", _exit);
+    }
+
+    private void ToggleLayout()
+    {
+        Compact = !Compact;
+        _scroll = 0;
+        LayoutChanged?.Invoke();
+        Invalidate();
+    }
+
+    private void DrawCompact(Graphics g, int w, int h)
+    {
+        TextAt(g, "AIUsageTray", 15, 9, 150, 28, 10, true);
+        Button(g, new Rectangle(w - 193, 10, 53, 27), "詳細", ToggleLayout);
+        Button(g, new Rectangle(w - 132, 10, 53, 27), "更新", _refresh);
+        Button(g, new Rectangle(w - 71, 10, 25, 27), "−", () => { if (FindForm() is { } f) f.WindowState = FormWindowState.Minimized; });
+        Button(g, new Rectangle(w - 38, 10, 25, 27), "×", () => FindForm()?.Hide());
+        var ids = new[] { "codex", "claude" };
+        var cardWidth = (w - 34) / 2;
+        for (var i = 0; i < ids.Length; i++)
+        {
+            var s = _snapshots.FirstOrDefault(s => s.ProviderId == ids[i])
+                ?? new ProviderSnapshot(ids[i], i == 0 ? "Codex" : "Claude", ProviderStatus.Unavailable,
+                    "設定で無効", "", Array.Empty<UsageWindow>(), DateTimeOffset.Now);
+            var card = new Rectangle(12 + i * (cardWidth + 10), 48, cardWidth, 208);
+            var accent = i == 0 ? Color.FromArgb(119, 226, 206) : Color.FromArgb(236, 177, 143);
+            Glass(g, card, 12, Color.FromArgb(25, 228, 242, 255));
+            var x = card.Left + 12; var width = card.Width - 24;
+            TextAt(g, s.DisplayName, x, 57, 112, 27, 12, true, accent);
+            TextAt(g, s.Plan ?? "—", x + 112, 60, width - 112, 23, 8, false, CodexColors.MutedText, true);
+            TextAt(g, s.Summary, x, 85, width, 21, 8, false, CodexColors.MutedText);
+            var y = 112;
+            foreach (var kind in new[] { WindowKind.Session, WindowKind.Weekly })
+            {
+                var meter = s.Windows.FirstOrDefault(m => m.Kind == kind);
+                var expired = meter?.ResetsAt <= DateTimeOffset.Now;
+                TextAt(g, kind == WindowKind.Session ? "5時間" : "週間", x, y, 70, 21, 9, true);
+                TextAt(g, meter?.UsedPercent is double used ? $"{used:0.#}% 使用" : "—", x + 76, y, width - 76, 21, 9, true,
+                    expired ? CodexColors.MutedText : accent, true);
+                Glass(g, new Rectangle(x, y + 25, width, 5), 2, Color.FromArgb(28, 225, 237, 249));
+                if (meter?.UsedPercent is double value && value > 0)
+                {
+                    using var fill = new SolidBrush(expired ? CodexColors.Offline : value >= 90 ? CodexColors.Error : accent);
+                    g.FillRectangle(fill, x + 1, y + 26, Math.Max(2, (width - 2) * (float)Math.Clamp(value / 100, 0, 1)), 3);
+                }
+                var detail = meter?.ResetsAt is { } reset
+                    ? expired ? "リセット済み · 更新待ち" : Remaining(reset) + "でリセット"
+                    : meter is not null ? meter.Summary
+                    : s.ProviderId == "codex" && s.Windows.Count > 0 ? "取得元に提供なし" : "未取得";
+                TextAt(g, detail, x, y + 31, width, 19, 7.5f, false, CodexColors.MutedText);
+                y += 49;
+            }
+            var model = s.ProviderId == "codex" ? s.Model ?? "モデル未取得"
+                : s.Windows.Any(m => m.Kind == WindowKind.ModelWeekly) ? "モデル別使用量は「詳細」へ"
+                : s.Status == ProviderStatus.Available ? "モデル枠の提供なし" : "接続後に取得";
+            TextAt(g, model, x, 212, width, 22, 8, true);
+            TextAt(g, $"{(i == 0 ? "ログ" : "取得")} {s.RefreshedAt.LocalDateTime:M/d HH:mm}", x, 234, width, 18, 7.5f, false, CodexColors.MutedText);
+        }
+        TextAt(g, _message, 15, h - 32, w - 163, 24, 7.5f, false, CodexColors.MutedText);
+        Button(g, new Rectangle(w - 143, h - 33, 59, 25), "設定", _settings);
+        Button(g, new Rectangle(w - 74, h - 33, 59, 25), "終了", _exit);
     }
 
     private static int CardHeight(ProviderSnapshot s) => 266 + Meters(s).Count * 77;
@@ -206,6 +276,7 @@ internal sealed class PopoverView : Control
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
+        if (Compact) return;
         _scroll = Math.Clamp(_scroll - e.Delta / 3, 0, Math.Max(0, _contentHeight - ((int)(Height / (DeviceDpi / 96f)) - 157)));
         Invalidate();
     }
@@ -225,7 +296,7 @@ internal sealed class PopoverView : Control
         if (e.Button != MouseButtons.Left) return;
         var point = new Point((int)(e.X / (DeviceDpi / 96f)), (int)(e.Y / (DeviceDpi / 96f)));
         foreach (var target in _targets) if (target.Bounds.Contains(point)) { target.Action(); return; }
-        if (point.Y < 85 && FindForm() is { } form)
+        if (point.Y < (Compact ? 46 : 85) && FindForm() is { } form)
         {
             NativeMethods.ReleaseCapture();
             NativeMethods.SendMessage(form.Handle, NativeMethods.WmNcLButtonDown, NativeMethods.HtCaption, IntPtr.Zero);
